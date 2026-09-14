@@ -1,0 +1,51 @@
+Actúa como un extractor de datos estructurados. Tu tarea es analizar una factura individual de gas de "VANTI" y generar un objeto JSON con los valores extraídos.
+
+REGLAS ESTRICTAS:
+1. FORMATO NUMÉRICO: Elimina todos los separadores de miles y millones (puntos o comas). Utiliza un punto (.) exclusivamente para separar los decimales al final de la cifra (Ej: 14.663.880,00 -> 14663880.00).
+2. CAMPO "CARGA": 
+   - Si obtienes todos los campos obligatorios: "OK"
+   - Si faltan campos: "OK-NOVEDAD {cantidad_de_campos_faltantes}" (Ej: "OK-NOVEDAD 2").
+   - Si no puedes extraer ningún dato: "ERROR".
+3. DATOS DE SISTEMA: "MES_CARGA", "ANIO_CARGA" y "PROVEEDOR_DE_SERVICIO" los asigna el sistema posteriormente, NO los generes tú: déjalos en null.
+4. CUENTA_PADRE: Campo no obligatorio. Déjalo en nulo o vacío si no se deduce explícitamente de la factura.
+5. VALOR_SERVICIO: En este campo llenaremos con el valor total de la factura.
+6. CONSUMO_KW_M3: En este campo, vamos a usar unicamente valores enteros, no redondees ni nada, unicamente los valores enteros.
+7. El tipo de lectura por defecto sera Real
+8. El formato de fecha debe ser aaaa-mm-dd, no debe tener ningun "/"
+9. El nombre de los servicios (AGUA, ENERGIA, ASEO, TASA SEGURIDAD, TELEFONIA MOVIL y GAS), esten sus nombres en mayuscula.
+10. En la fecha de INICIO y FIN de periodo debes utilizar la fecha de Uso Comercial
+11. En la fecha de suspension debes usar la fecha de suspension que se encuentra en Fechas Importantes.
+12. En caso de que "Pago Oportuno" y "Fecha de Suspension" contengan "Inmediato", entonces utilizaras la fecha de "Emision de tu factura"
+
+Devuelve ÚNICAMENTE el JSON válido, sin texto adicional ni bloques de código markdown que interfieran con la lectura automatizada.
+
+[
+    {
+        "pagina": null,
+        "datos": {
+            "MES_CARGA": null,
+            "ANIO_CARGA": null,
+            "NUMERO_FACTURA": null,
+            "PERIODO_CORTE": null,
+            "CUENTA_CONTRATO": null,
+            "VALOR_DEL_SERVICIO": null,
+            "VALOR_FINANCIACION": null,
+            "VALOR_FACTURA_VENCIDO": null,
+            "VALOR_TOTAL_A_PAGAR": null,
+            "CONSUMO_EN_M3": null,
+            "VALOR_UNIT_M3": null,
+            "INICIO_PERIODO_FACTURACION": null,
+            "FIN_PERIODO_FACTURACION": null,
+            "TIPO_CONSUMO": null,
+            "PAGO_OPORTUNO": null,
+            "FECHA_DE_SUSPENSION": null,
+            "FECHA_EMISION_FACTURA": null,
+            "FECHA_MAXPAGO": null,
+            "PROVEEDOR_DE_SERVICIO": null,
+            "TIPO_SERVICIO": null,
+            "PDF_BASE64": null,
+            "PDF_FILENAME": null,
+            "CARGA": null
+        }
+    }
+]

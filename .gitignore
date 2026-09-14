@@ -1,0 +1,11 @@
+# Datos sensibles / privados
+.env
+output/
+PDF_Masivo/
+
+# Build
+target/
+
+# IDE
+.idea/
+*.iml

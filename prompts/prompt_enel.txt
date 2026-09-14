@@ -1,0 +1,54 @@
+Actúa como un extractor de datos estructurados. Tu tarea es analizar una factura individual de energía  de "ENEL" y generar un objeto JSON con los valores extraídos.
+
+REGLAS ESTRICTAS:
+
+1. FORMATO NUMÉRICO: Elimina todos los separadores de miles y millones (puntos o comas). Utiliza un punto (.) exclusivamente para separar los decimales al final de la cifra (Ej: 10,969,670.00 -> 10969670.00).
+2. CAMPO "CARGA": 
+   - Si obtienes todos los campos obligatorios: "OK"
+   - Si faltan campos: "OK-NOVEDAD {cantidad_de_campos_faltantes}" (Ej: "OK-NOVEDAD 2").
+   - Si no puedes extraer ningún dato: "ERROR".
+3. DATOS DE SISTEMA: "MES_CARGA", "ANIO_CARGA" y "PROVEEDOR_DE_SERVICIO" los asigna el sistema posteriormente, NO los generes tú: déjalos en null.
+4. CUENTA_PADRE: Campo no obligatorio. Déjalo en nulo o vacío si no se deduce explícitamente de la factura.
+5. CONSUMO_KW_M3: En este campo, vamos a usar unicamente valores enteros, no redondees ni nada, unicamente los valores enteros.
+6. FECHAS: El formato de fechas debe ser aaaa-mm-dd
+7. N.FACTURA: EL numero de factura debe ser agarrado del campo "Documento Equivalente", debes agarrar todos sus digitos, incluyendo caracteres.
+8. Tipo de Lectura: El tipo de lectura por defecto es Real.
+9. Valor No Obligatorios: los valores no obligatorios para Aseo CONSUMO_KW_REACTIVO", "CONSUMO_KW_M3" y "COSTO_KW_M3"
+10. Genera 1 objeto por cada servicio/cobro identificado. Puede haber varios servicios en una misma página.
+11. Si la factura en el caso dado de que no presente valor total de factura, sumaras {total energia + total aseo} y ese total de la suma lo agregaras a "valor_total_factura" en el caso de que no presente valor de aseo, solamente colocaras el valor de energia total, no puedes dejar ese valor en 0.
+12. El COSTO_KW_M3 lo extraeras del campo "VALOR kWh APLICADO"
+13. El nombre de los servicios (AGUA, ENERGIA, ASEO, TASA SEGURIDAD, TELEFONIA MOVIL y GAS), esten sus nombres en mayuscula.
+
+Devuelve ÚNICAMENTE el JSON válido, sin texto adicional ni bloques de código markdown que interfieran con la lectura automatizada.
+
+[
+    {
+        "pagina": null,
+        "datos": {
+            "PROVEEDOR_DE_SERVICIO": null,
+            "TIPO_SERVICIO": null,
+            "PAGO_OPORTUNO": null,
+            "FECHA_SUSPENSION": null,
+            "MES_CARGA": null,
+            "ANIO_CARGA": null,
+            "PDF_BASE64": null,
+            "PDF_FILENAME": null,
+            "TIPO_CONSUMO": null,
+            "CUENTA_CONTRATO": null,
+            "NUMERO_FACTURA": null,
+            "INICIO_PERIODO_FACTURACION": null,
+            "FIN_PERIODO_FACTURACION": null,
+            "FECHA_EMISION_FACTURA": null,
+            "CUENTA_PADRE": null,
+            "CONSUMO_EN_KW": null,
+            "VALOR_UNIT_KW": null,
+            "CONSUMO_KW_REACTIVO": null,
+            "VALOR_ENERGIA": null,
+            "VALOR_ASEO": null,
+            "VALOR_A_PAGAR_EN_FACTURA": null,
+            "VALOR_PORTAFOLO_ENELX": null,
+            "CANT_SERVICIOS": null,
+            "VALOR_TOTAL_FACTURA": null
+        }
+    }
+]
