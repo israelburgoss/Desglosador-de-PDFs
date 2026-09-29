@@ -9,13 +9,17 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
+import java.util.Map;
 import java.util.Optional;
+import java.util.TreeMap;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.stream.Stream;
 
 /**
  * Comando "extract": lee las facturas YA divididas por "split"
@@ -42,9 +46,12 @@ public class ExtractCommand {
     public static void run(String[] args) throws IOException {
         boolean fuerza = false;
         Path lote = null;
+        String proveedorSel = null;
         for (int i = 1; i < args.length; i++) {
             if ("--fuerza".equals(args[i])) {
                 fuerza = true;
+            } else if (isProviderName(args[i]) && lote == null) {
+                proveedorSel = args[i].toUpperCase(Locale.ROOT);
             } else if (lote == null) {
                 lote = Path.of(args[i]);
             } else {
@@ -55,7 +62,13 @@ public class ExtractCommand {
         final boolean fuerzaF = fuerza;
 
         if (lote == null) {
-            Optional<Path> latest = BatchDirectories.latestBatch();
+            Optional<Path> latest;
+            if (proveedorSel != null) {
+                System.out.println("Proveedor seleccionado: " + proveedorSel);
+                latest = BatchDirectories.latestBatchFor(proveedorSel);
+            } else {
+                latest = BatchDirectories.latestBatch();
+            }
             if (latest.isEmpty()) {
                 System.err.println("No hay lotes en output/. Corre primero: split <PROVEEDOR> <ruta-pdf-masivo> [mes] [anio]");
                 return;
@@ -64,16 +77,33 @@ public class ExtractCommand {
             System.out.println("Lote detectado (el más reciente): " + lote.toAbsolutePath());
         }
 
+        int ok = extractLote(lote, fuerzaF);
+        if (ok < 0) {
+            return;
+        }
+        System.out.println();
+        System.out.println("Ahora corre: merge <PROVEEDOR>");
+    }
+
+    /**
+     * Procesa con la IA todas las facturas de un lote, generando su JSON por
+     * factura en facturas_json/. Reanuda (omite) las facturas cuyo JSON ya
+     * existe salvo que se fuerce la reprocesión.
+     *
+     * @return número de facturas procesadas OK, o -1 si hubo un error fatal
+     *         (falta manifest, falta AI_API_KEY o falta el prompt).
+     */
+    public static int extractLote(Path lote, boolean fuerza) throws IOException {
         Path manifestPath = BatchDirectories.manifestOf(lote);
         if (!Files.exists(manifestPath)) {
             System.err.println("No existe el manifest del lote: " + manifestPath);
-            return;
+            return -1;
         }
 
         String apiKey = Env.get("AI_API_KEY");
         if (apiKey == null || apiKey.isBlank()) {
             System.err.println("Falta la variable de entorno AI_API_KEY (define el .env o expórtala).");
-            return;
+            return -1;
         }
         String apiUrl = Env.get("AI_API_URL", DEFAULT_API_URL);
 
@@ -89,7 +119,7 @@ public class ExtractCommand {
         Path promptPath = promptPathFor(proveedor);
         if (!Files.exists(promptPath)) {
             System.err.println("No existe el prompt del proveedor: " + promptPath);
-            return;
+            return -1;
         }
         String promptTemplate = Files.readString(promptPath);
         InvoiceExtractor extractor = new InvoiceExtractor(apiUrl, apiKey, proveedor, promptTemplate);
@@ -116,7 +146,7 @@ public class ExtractCommand {
                 int pagina = entry.get("pagina").asInt();
                 Path outFile = jsonDir.resolve("factura_%04d.json".formatted(index));
 
-                if (Files.exists(outFile) && !fuerzaF) {
+                if (Files.exists(outFile) && !fuerza) {
                     omitidas.add(index);
                     return;
                 }
@@ -151,8 +181,49 @@ public class ExtractCommand {
         if (!errores.isEmpty()) {
             System.out.println("  — Vuelve a correr 'extract' (sin --fuerza) para reintentar solo las fallidas.");
         }
+        printCompletitudResumen(jsonDir, mapper);
+        return okRegistros.size();
+    }
+
+    /** true si el argumento es el nombre de un proveedor soportado. */
+    private static boolean isProviderName(String arg) {
+        String up = arg.toUpperCase(Locale.ROOT);
+        return up.equals("EPM") || up.equals("ENEL") || up.equals("VANTI");
+    }
+
+    /**
+     * Verificación de completitud tras el extract: muestra la distribución de
+     * "CARGA" (OK / OK-NOVEDAD X / ERROR) entre los JSON generados, para
+     * detectar facturas a las que el modelo no halló todos los campos
+     * obligatorios SIN tener que abrir cada archivo.
+     */
+    private static void printCompletitudResumen(Path jsonDir, ObjectMapper mapper) throws IOException {
+        List<Path> files;
+        try (Stream<Path> entries = Files.list(jsonDir)) {
+            files = entries.filter(Files::isRegularFile)
+                    .filter(p -> p.getFileName().toString().matches("factura_\\d{4}\\.json"))
+                    .sorted()
+                    .toList();
+        }
+        if (files.isEmpty()) {
+            return;
+        }
+        Map<String, List<String>> byCarga = new TreeMap<>();
+        for (Path file : files) {
+            JsonNode array = mapper.readTree(file.toFile());
+            for (JsonNode record : array) {
+                String carga = record.at("/datos/CARGA").asText("");
+                byCarga.computeIfAbsent(carga, k -> new ArrayList<>()).add(file.getFileName().toString());
+            }
+        }
         System.out.println();
-        System.out.println("Ahora corre: merge [carpeta-lote]");
+        System.out.println("Verificación de completitud (CARGA calculada por el extractor):");
+        for (Map.Entry<String, List<String>> e : byCarga.entrySet()) {
+            String key = e.getKey().isBlank() ? "(sin CARGA)" : e.getKey();
+            List<String> lista = e.getValue();
+            String detalle = lista.size() <= 6 ? String.join(", ", lista) : lista.size() + " registros";
+            System.out.println("  " + key + " → " + lista.size() + "  [" + detalle + "]");
+        }
     }
 
     private static int parseConcurrencia() {

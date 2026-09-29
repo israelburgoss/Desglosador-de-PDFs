@@ -11,7 +11,7 @@ REGLAS ESTRICTAS:
 4. CUENTA_PADRE: Campo no obligatorio. Déjalo en nulo o vacío si no se deduce explícitamente de la factura.
 5. CONSUMO_KW_M3: En este campo, vamos a usar unicamente valores enteros, no redondees ni nada, unicamente los valores enteros.
 6. FECHAS: El formato de fechas debe ser aaaa-mm-dd
-7. N.FACTURA: EL numero de factura debe ser agarrado del campo "Documento Equivalente", debes agarrar todos sus digitos, incluyendo caracteres.
+7. N.FACTURA: EL numero de factura debe ser el valor del campo "CUDE" (Código Único de Documento Equivalente), toma todos sus dígitos y caracteres.
 8. Tipo de Lectura: El tipo de lectura por defecto es Real.
 9. Valor No Obligatorios: los valores no obligatorios para Aseo CONSUMO_KW_REACTIVO", "CONSUMO_KW_M3" y "COSTO_KW_M3"
 10. Genera 1 objeto por cada servicio/cobro identificado. Puede haber varios servicios en una misma página.
@@ -52,3 +52,7 @@ Devuelve ÚNICAMENTE el JSON válido, sin texto adicional ni bloques de código 
         }
     }
 ]
+
+=== FACTURA A ANALIZAR (texto extraído del PDF). Todos los valores del JSON deben extraerse EXCLUSIVAMENTE de este texto, colocado justo debajo: ===
+
+{{FACTURA_TEXTO}}

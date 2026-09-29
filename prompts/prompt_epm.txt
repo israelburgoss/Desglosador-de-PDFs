@@ -58,3 +58,6 @@ JSON General:
         }
     }
 ]
+=== FACTURA A ANALIZAR (texto extraído del PDF). Todos los valores del JSON deben extraerse EXCLUSIVAMENTE de este texto, colocado justo debajo: ===
+
+{{FACTURA_TEXTO}}

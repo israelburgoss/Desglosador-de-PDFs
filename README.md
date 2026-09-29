@@ -201,12 +201,45 @@ por PÁGINA:
 | ENEL      | `cude`                            |
 | VANTI     | `factura no.`                     |
 
-La división es POR PÁGINA: si una página contiene más de un patrón de
-inicio (varias facturas cortas en la misma hoja), esas facturas quedan
-fusionadas en una sola y se avisa en consola. Si ninguna página contiene
-el patrón, el archivo completo se trata como UNA sola factura. Las
-páginas previas al primer patrón (carátula) se omiten avisando en
-consola.
+La división de ENEL y VANTI es POR PÁGINA: cada página que contiene el
+patrón inicia una factura y las páginas siguientes (hasta la siguiente
+coincidencia) se le anexan. Si una página contuviera más de un patrón,
+esas facturas quedarían fusionadas y se avisa en consola.
+
+**EPM se divide como un FLUJO CONTINUO de facturas.** Cada cabecera
+`Prestación del servicio:...` detectada en el PDF delimita UNA factura
+(26 en total), aunque haya varias cabeceras en una misma página (5
+páginas apiladas con 2 facturas) o aunque la cola de una factura quede
+al inicio de la página siguiente. La banda negra divisoria queda
+visiblemente por ENCIMA de cada cabecera, así que corresponde al cierre
+de la factura anterior: cada factura se corta EXACTAMENTE en el borde
+superior de su propia cabecera, de modo que ninguna incluye ni un
+renglón de la factura vecina.
+
+**La detección es por CONTENIDO, no por coordenadas fijas:** en cada
+corrida se re-escanea el texto del PDF (`pdftotext -bbox`) y se ubica
+dónde cae cada cabecera, con comparación NORMALIZADA (sin tildes y
+tolerante a que la frase de la cabecera quede partida en dos líneas).
+Por eso aguanta facturas que aparezcan en posiciones distintas o con
+cabeceras que escriban "Prestacion" sin tilde. Cada franja se recorta
+por CropBox+MediaBox y su `.txt` se extrae solo de esa zona con
+`pdftotext -x -y -W -H` (margen de 1pt en los bordes para no arrastrar
+la cabecera ni la cola de la vecina). El `manifest.json` marca con
+`"region"` la posición dentro de las páginas con varias facturas
+(`1|2`) y las páginas con el nº de origen.
+
+**Avisos de verificación en consola:** antes de dividir, el programa
+cruza las cabeceras detectadas contra el texto por página; si no
+cuadran, imprime un `AVISO`. Tras dividir, verifica que cada
+`factura_NNNN.txt` contenga SU propia cabecera; si alguna no la tiene,
+avisa para revisarla. Las páginas iniciales sin patrón (carátula) se
+omiten avisando, y si el PDF termina con páginas sin cabecera propia,
+se anexan a la última factura y se avisa. La portada/DEE de EPM que se
+prepone a cada factura se DETECTA por su marca ("Documento equivalente
+electrónico SPD"), no se asume que sea siempre la página 0.
+
+Si ninguna página contiene el patrón, el archivo completo se trata como
+UNA sola factura.
 
 ## Cómo ejecutarlo — probando por etapas
 
@@ -229,14 +262,20 @@ contiene el texto de UNA sola factura completa. Si algo quedó mal
 cortado, ajusta `START_PATTERNS` en `PdfInvoiceSplitter.java` y vuelve a
 correr `split` (generará otro lote; el anterior sigue intacto).
 
-**Primera página del masivo (EPM y ENEL):** a CADA factura dividida de
-estos proveedores se le PREPONE una copia de la PRIMERA página del PDF
-masivo (clonada con `PDDocument.importPage`, sin perder recursos) — tanto
-en el PDF como en el `.txt`, porque esa página trae información importante
-para los JSON individuales (en EPM, el DEE consolidado con el total; en
-ENEL, la primera factura). En EPM y ENEL la página 1 del masivo **no se
-factura por sí sola**: solo se copia como portada de las demás. VANTI no
-aplica: cada factura trae su propia información completa.
+**Portada/DEE del masivo (SOLO EPM):** a CADA factura EPM dividida se le
+PREPONE una copia de la portada (el DEE consolidado), clonada con
+`PDDocument.importPage` (sin perder recursos), tanto en el PDF como en el
+`.txt`, porque esa página trae el DEE con información importante para los
+JSON individuales. La portada se DETECTA por su marca ("Documento
+equivalente electrónico SPD"), así que no se asume que sea siempre la
+primera página si el masivo cambia de forma. Las páginas iniciales sin
+patrón se omiten como carátula (avisando). ENEL y VANTI NO reciben
+portada: cada factura trae su propia información.
+
+**Marcado de página de origen:** cada `factura_NNNN.pdf` lleva marcado en
+la esquina superior derecha el número de la página del masivo de donde fue
+extraída esa factura (por ejemplo `Página 7`). Esto permite rastrear cada
+PDF al PDF original. La marca NO entra en el `.txt` (no gasta tokens).
 
 **Descarte de páginas boilerplate (ENEL):** las páginas con
 `Página 2 de 3` y `Página 3 de 3` de cada factura ENEL solo traen

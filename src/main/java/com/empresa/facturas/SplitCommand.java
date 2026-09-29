@@ -67,6 +67,27 @@ public class SplitCommand {
             return;
         }
 
+        Path loteDir = dividir(proveedor, pdfMasivo, mesCarga, anioCarga);
+        System.out.println();
+        System.out.println("Revisa los .txt: cada archivo debe contener el texto de UNA sola factura completa.");
+        System.out.println("Si alguna quedó mal cortada, ajusta START_PATTERNS en PdfInvoiceSplitter y vuelve a correr split.");
+        System.out.println("Para continuar: extract [carpeta-lote] o merge <PROVEEDOR>.");
+    }
+
+    /**
+     * Divide un PDF masivo en facturas individuales y crea el LOTE
+     * (output/&lt;proveedor&gt;/&lt;timestamp&gt;/) con facturas_pdf/,
+     * facturas_txt/ y manifest.json. Nunca borra lotes anteriores.
+     *
+     * @return la carpeta del lote creado.
+     */
+    public static Path dividir(String proveedor, Path pdfMasivo, String mesCarga, String anioCarga)
+            throws IOException {
+        if (!Files.exists(pdfMasivo)) {
+            throw new IOException("No se encontró el archivo PDF: " + pdfMasivo
+                    + " (directorio actual: " + Path.of("").toAbsolutePath() + ")");
+        }
+
         Path proveedorDir = BatchDirectories.providerDir(proveedor);
         Path loteDir = BatchDirectories.newBatchDir(proveedor);
         Files.createDirectories(proveedorDir);
@@ -97,6 +118,7 @@ public class SplitCommand {
             entry.put("pdfFilename", "factura_%04d.pdf".formatted(i));
             entry.put("txtFilename", txtFilename);
             entry.put("pagina", paginaHumana);
+            entry.put("region", segment.region());
             entry.put("numPages", segment.numPages());
             manifestEntries.add(entry);
         }
@@ -115,13 +137,11 @@ public class SplitCommand {
         System.out.println("TXT en:   " + txtDir.toAbsolutePath());
         System.out.println("Manifest: " + loteDir.resolve("manifest.json").toAbsolutePath());
         System.out.println("Nota: los lotes anteriores se conservan en " + proveedorDir.toAbsolutePath());
-        System.out.println();
-        System.out.println("Revisa los .txt: cada archivo debe contener el texto de UNA sola factura completa.");
-        System.out.println("Si alguna quedó mal cortada, ajusta START_PATTERNS en PdfInvoiceSplitter y vuelve a correr split.");
-        System.out.println("Para continuar: extract [carpeta-lote] o merge [carpeta-lote] (sin argumentos usa el lote más reciente).");
+
+        return loteDir;
     }
 
-    private static String validarRango(String raw, int min, int max, String label) throws IOException {
+    static String validarRango(String raw, int min, int max, String label) throws IOException {
         String trimmed = raw.trim();
         try {
             int value = Integer.parseInt(trimmed);

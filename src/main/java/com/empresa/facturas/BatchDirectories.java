@@ -18,11 +18,10 @@ import java.util.stream.Stream;
  *     facturas_txt/factura_NNNN.txt     (genera "split")
  *     manifest.json                     (genera "split", lo usa "extract")
  *     facturas_json/factura_NNNN.json   (genera "extract")
- *     facturas_final.json               (genera "merge")
+ *     output/&lt;proveedor&gt;/facturas_final_&lt;timestamp&gt;.json  (genera "merge"; JSON masivo por proveedor)
  *
- * "extract" y "merge" pueden recibir la ruta de un lote; si no la reciben,
- * usan el lote MÁS RECIENTE: el que tenga manifest.json con la fecha de
- * modificación más tardía dentro de output/.
+ * "extract" y "merge" pueden recibir la ruta de un lote o el nombre del
+ * proveedor (merge ENEL usa el lote más reciente de ENEL).
  */
 public final class BatchDirectories {
 
@@ -72,6 +71,64 @@ public final class BatchDirectories {
     }
 
     /**
+     * Ruta del JSON MASIVO del proveedor, en su carpeta exclusiva
+     * (output/&lt;proveedor&gt;/), con el timestamp de la ejecución del merge
+     * en el nombre: facturas_final_&lt;yyyymmdd_HHMMSS&gt;.json. Se agrega
+     * sufijo _2, _3... si ya existe (dos ejecuciones en el mismo segundo),
+     * de modo que nunca se sobrescribe un masivo anterior.
+     */
+    public static Path newFinalJsonPath(String proveedor) {
+        Path base = providerDir(proveedor);
+        String stamp = LocalDateTime.now().format(STAMP);
+        Path file = base.resolve("facturas_final_" + stamp + ".json");
+        int n = 2;
+        while (Files.exists(file)) {
+            file = base.resolve("facturas_final_" + stamp + "_" + n + ".json");
+            n++;
+        }
+        return file;
+    }
+
+    /**
+     * Lote más reciente de un proveedor concreto
+     * (output/&lt;proveedor&gt;/&lt;lote&gt;/manifest.json).
+     */
+    public static Optional<Path> latestBatchFor(String proveedor) {
+        Path dir = providerDir(proveedor);
+        if (!Files.isDirectory(dir)) {
+            return Optional.empty();
+        }
+        Path[] manifests;
+        try (Stream<Path> files = Files.list(dir)) {
+            manifests = files
+                    .filter(Files::isDirectory)
+                    .map(BatchDirectories::manifestOf)
+                    .filter(Files::isRegularFile)
+                    .toArray(Path[]::new);
+        } catch (IOException e) {
+            return Optional.empty();
+        }
+        return latestOf(manifests);
+    }
+
+    private static Optional<Path> latestOf(Path[] manifests) {
+        Path best = null;
+        long bestTime = -1;
+        for (Path manifest : manifests) {
+            try {
+                long time = Files.getLastModifiedTime(manifest).toMillis();
+                if (time > bestTime) {
+                    bestTime = time;
+                    best = manifest.getParent();
+                }
+            } catch (IOException ignored) {
+                // no-op
+            }
+        }
+        return Optional.ofNullable(best);
+    }
+
+    /**
      * Lote más reciente: la carpeta cuyo manifest.json fue modificado más
      * tarde dentro de output/ (el árbol se recorre a profundidad 3).
      */
@@ -89,20 +146,6 @@ public final class BatchDirectories {
         } catch (IOException e) {
             return Optional.empty();
         }
-
-        Path best = null;
-        long bestTime = -1;
-        for (Path manifest : manifests) {
-            try {
-                long time = Files.getLastModifiedTime(manifest).toMillis();
-                if (time > bestTime) {
-                    bestTime = time;
-                    best = manifest.getParent();
-                }
-            } catch (IOException ignored) {
-                // no-op
-            }
-        }
-        return Optional.ofNullable(best);
+        return latestOf(manifests);
     }
 }

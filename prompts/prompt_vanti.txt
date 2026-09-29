@@ -16,6 +16,7 @@ REGLAS ESTRICTAS:
 10. En la fecha de INICIO y FIN de periodo debes utilizar la fecha de Uso Comercial
 11. En la fecha de suspension debes usar la fecha de suspension que se encuentra en Fechas Importantes.
 12. En caso de que "Pago Oportuno" y "Fecha de Suspension" contengan "Inmediato", entonces utilizaras la fecha de "Emision de tu factura"
+13. FECHA_MAXPAGO: se extrae del texto "Entre X y el Y de <mes>" usando el límite superior Y, con el año de la factura. Ej: "Entre 08 y el 13 de Septiembre" → 2026-09-13. Si ese bloque no aparece en la factura, déjalo en null.
 
 Devuelve ÚNICAMENTE el JSON válido, sin texto adicional ni bloques de código markdown que interfieran con la lectura automatizada.
 
@@ -49,3 +50,6 @@ Devuelve ÚNICAMENTE el JSON válido, sin texto adicional ni bloques de código 
         }
     }
 ]
+=== FACTURA A ANALIZAR (texto extraído del PDF). Todos los valores del JSON deben extraerse EXCLUSIVAMENTE de este texto, colocado justo debajo: ===
+
+{{FACTURA_TEXTO}}

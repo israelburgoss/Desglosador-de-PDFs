@@ -14,8 +14,9 @@ import java.util.stream.Stream;
 
 /**
  * Une todos los JSON individuales (factura_0000.json, 0001.json, ...)
- * generados por "extract" en un SOLO archivo: output/facturas_final.json
- * — el array definitivo que se copia en el sistema destino.
+ * generados por "extract" en UN SOLO archivo: el JSON masivo del proveedor
+ * (output/&lt;proveedor&gt;/facturas_final_&lt;timestamp&gt;.json) — el array
+ * definitivo que se copia en el sistema destino.
  *
  * Cada factura_NNNN.json contiene un ARRAY de registros {pagina, datos}
  * (un registro por cada servicio/cobro de esa factura). Este merger

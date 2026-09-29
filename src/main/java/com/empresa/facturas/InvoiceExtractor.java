@@ -15,7 +15,11 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.Set;
 
 /**
  * Llama a la IA para UNA factura ya segmentada y guarda el resultado.
@@ -28,6 +32,9 @@ import java.util.List;
  *   - NO inyecta PDF_BASE64 ni PDF_FILENAME (lo pone el sistema destino),
  *   - sobreescribe PROVEEDOR_DE_SERVICIO, MES_CARGA y ANIO_CARGA con
  *     valores autoritativos (el prompt dice que el modelo los deje en null),
+ *   - fuerza "pagina" desde el manifest (el modelo la adivina mal),
+ *   - recalcula "CARGA" por código (OK / OK-NOVEDAD X / ERROR) según los
+ *     campos obligatorios aplicables de cada registro,
  *   - todas las llamadas fallidas reintentables (429, 5xx, 408, timeout)
  *     se reintentan con backoff creciente.
  *
@@ -38,6 +45,48 @@ public class InvoiceExtractor {
 
     private static final int MAX_RETRIES = 3;
     private static final Duration REQUEST_TIMEOUT = Duration.ofSeconds(120);
+    private static final String DEFAULT_MODEL = "gpt-6-luna";
+
+    /** Campos que inyecta el sistema destino (nunca cuentan como faltantes). */
+    private static final Set<String> CAMPOS_SISTEMA = Set.of(
+            "PROVEEDOR_DE_SERVICIO", "MES_CARGA", "ANIO_CARGA", "PDF_BASE64", "PDF_FILENAME", "CARGA");
+
+    /**
+     * Campos obligatorios presentes en TODOS los registros de cada proveedor,
+     * independientemente del servicio. Los campos que solo aplican a un
+     * servicio concreto van en OBLIGATORIOS_POR_SERVICIO.
+     */
+    private static final Map<String, Set<String>> OBLIGATORIOS_BASE = Map.of(
+            "ENEL", Set.of("TIPO_SERVICIO", "PAGO_OPORTUNO", "CUENTA_CONTRATO", "NUMERO_FACTURA",
+                    "INICIO_PERIODO_FACTURACION", "FIN_PERIODO_FACTURACION", "FECHA_EMISION_FACTURA",
+                    "VALOR_A_PAGAR_EN_FACTURA", "CANT_SERVICIOS", "VALOR_TOTAL_FACTURA"),
+            "EPM", Set.of("NUMERO_FACTURA", "CUENTA_CONTRATO", "TIPO_SERVICIO", "PRESTADOR_SERVICIO",
+                    "VALOR_SERVICIO", "VALOR_TOTAL_FACTURA", "FECHA_EMISION_FACTURA", "FECHA_MAXPAGO",
+                    "INICIO_PERIODO_FACTURACION", "FIN_PERIODO_FACTURACION"),
+            "VANTI", Set.of("NUMERO_FACTURA", "PERIODO_CORTE", "CUENTA_CONTRATO", "VALOR_DEL_SERVICIO",
+                    "VALOR_TOTAL_A_PAGAR", "CONSUMO_EN_M3", "VALOR_UNIT_M3",
+                    "INICIO_PERIODO_FACTURACION", "FIN_PERIODO_FACTURACION", "TIPO_CONSUMO",
+                    "PAGO_OPORTUNO", "FECHA_DE_SUSPENSION", "FECHA_EMISION_FACTURA", "FECHA_MAXPAGO",
+                    "TIPO_SERVICIO"));
+
+    /**
+     * Campos obligatorios SOLO cuando el TIPO_SERVICIO del registro aplica
+     * (ej. VALOR_ASEO solo en un registro ASEO). Evita marcar novedad un campo
+     * que pertenece a OTRO registro de la misma factura.
+     */
+    private static final Map<String, Map<String, Set<String>>> OBLIGATORIOS_POR_SERVICIO = Map.of(
+            "ENEL", Map.of(
+                    "ENERGIA", Set.of("TIPO_CONSUMO", "CONSUMO_EN_KW", "VALOR_UNIT_KW", "VALOR_ENERGIA"),
+                    "ASEO", Set.of("VALOR_ASEO"),
+                    "AGUA", Set.of("VALOR_ENERGIA"),
+                    "GAS", Set.of("VALOR_ENERGIA"),
+                    "TASA SEGURIDAD", Set.of("VALOR_ENERGIA"),
+                    "TELEFONIA MOVIL", Set.of("VALOR_ENERGIA")),
+            "EPM", Map.of(
+                    "AGUA", Set.of("CONSUMO_KW_M3", "COSTO_KW_M3"),
+                    "ENERGIA", Set.of("CONSUMO_KW_M3", "COSTO_KW_M3"),
+                    "GAS", Set.of("CONSUMO_KW_M3", "COSTO_KW_M3")),
+            "VANTI", Map.of());
 
     private final HttpClient httpClient = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(30))
@@ -85,8 +134,7 @@ public class InvoiceExtractor {
 
     /**
      * Convierte la respuesta del modelo en una lista de registros {pagina, datos}.
-     * Acepta un array (lo normal) o un objeto único (compatibilidad) y llena
-     * los campos de sistema.
+     * Acepta un array (lo normal) o un objeto único (compatibilidad).
      */
     private List<JsonNode> normalizeRecords(JsonNode response, int paginaHumana,
                                             String mesCarga, String anioCarga) {
@@ -101,20 +149,17 @@ public class InvoiceExtractor {
         return result;
     }
 
+    /**
+     * Convierte la respuesta del modelo en un registro {pagina, datos} normalizado:
+     * fuerza la página desde el manifest (el modelo no conoce las páginas del
+     * PDF original, las adivina mal), inyecta los campos de sistema y calcula
+     * CARGA por código (no se confía en lo que ponga el modelo).
+     */
     private JsonNode normalizeRecord(JsonNode record, int paginaHumana,
                                      String mesCarga, String anioCarga) {
         ObjectNode normalized = record.isObject() ? (ObjectNode) record : mapper.createObjectNode();
 
-        JsonNode paginaNode = normalized.get("pagina");
-        if (paginaNode == null || paginaNode.isNull()) {
-            normalized.put("pagina", paginaHumana);
-        } else {
-            try {
-                normalized.put("pagina", paginaNode.asInt());
-            } catch (NumberFormatException e) {
-                normalized.put("pagina", paginaHumana);
-            }
-        }
+        normalized.put("pagina", paginaHumana);
 
         JsonNode datosNode = normalized.get("datos");
         ObjectNode datos = (datosNode != null && datosNode.isObject())
@@ -127,7 +172,45 @@ public class InvoiceExtractor {
         datos.put("PROVEEDOR_DE_SERVICIO", proveedor);
         datos.put("MES_CARGA", mesCarga);
         datos.put("ANIO_CARGA", anioCarga);
+        calcularCarga(datos, proveedor);
         return normalized;
+    }
+
+    /**
+     * Calcula "CARGA" de forma determinista tras normalizar el registro:
+     *   OK           — todos los campos obligatorios aplicables presentes.
+     *   OK-NOVEDAD X — faltan X campos obligatorios aplicables (un 0 sí es válido).
+     *   ERROR        — ningún campo obligatorio aplicable tiene valor.
+     * Excluye los campos de sistema y los que solo le aplican a otro servicio
+     * de la misma factura.
+     */
+    private void calcularCarga(ObjectNode datos, String proveedor) {
+        String servicio = datos.path("TIPO_SERVICIO").asText("").trim().toUpperCase(Locale.ROOT);
+        Set<String> requeridos = new HashSet<>(OBLIGATORIOS_BASE.getOrDefault(proveedor, Set.of()));
+        requeridos.addAll(OBLIGATORIOS_POR_SERVICIO
+                .getOrDefault(proveedor, Map.of()).getOrDefault(servicio, Set.of()));
+
+        int faltantes = 0;
+        boolean algunValor = false;
+        for (String campo : requeridos) {
+            JsonNode valor = datos.get(campo);
+            boolean falta = valor == null || valor.isNull()
+                    || (valor.isTextual() && (valor.asText().isBlank()
+                    || "null".equalsIgnoreCase(valor.asText().trim())));
+            if (falta) {
+                faltantes++;
+            } else {
+                algunValor = true;
+            }
+        }
+
+        if (!algunValor) {
+            datos.put("CARGA", "ERROR");
+        } else if (faltantes > 0) {
+            datos.put("CARGA", "OK-NOVEDAD " + faltantes);
+        } else {
+            datos.put("CARGA", "OK");
+        }
     }
 
     /**
@@ -135,7 +218,8 @@ public class InvoiceExtractor {
      * 429 (rate limit), 408 (timeout), 5xx y excepciones de red/timeout.
      */
     private JsonNode callModel(String prompt, int index) throws IOException, InterruptedException {
-        String requestBody = mapper.writeValueAsString(new AiRequest(prompt));
+        String requestBody = mapper.writeValueAsString(new AiRequest(
+                Env.get("AI_MODEL", DEFAULT_MODEL), prompt));
         IOException last = null;
 
         for (int attempt = 1; attempt <= MAX_RETRIES; attempt++) {
@@ -181,12 +265,38 @@ public class InvoiceExtractor {
 
     private JsonNode extractJsonFromModelResponse(String body, int index) throws IOException {
         JsonNode apiResponse = mapper.readTree(body);
-        String contentText = apiResponse.at("/content/0/text").asText(null);
+        String contentText = findFirstOutputText(apiResponse);
         if (contentText == null || contentText.isBlank()) {
-            throw new IOException("La respuesta del modelo no trae content/0/text (factura " + index + "): "
+            throw new IOException("La respuesta del modelo no trae output[].content[].text (factura " + index + "): "
                     + truncate(body));
         }
         return parseJsonText(contentText);
+    }
+
+    /**
+     * Localiza el primer fragmento de texto real de la respuesta de la
+     * Responses API. El formato varía: a veces el texto está en
+     * output[0].content[0].text, y a veces hay una entrada previa de tipo
+     * "reasoning" (con encrypted_content, irrelevante) y el mensaje final está
+     * en output[1].content[0].text. Se recorre la lista "output" buscando el
+     * primer item de contenido con campo "text".
+     */
+    private String findFirstOutputText(JsonNode apiResponse) {
+        JsonNode output = apiResponse.get("output");
+        if (output != null && output.isArray()) {
+            for (JsonNode item : output) {
+                JsonNode content = item.get("content");
+                if (content == null || !content.isArray()) {
+                    continue;
+                }
+                for (JsonNode block : content) {
+                    if (block.hasNonNull("text")) {
+                        return block.get("text").asText(null);
+                    }
+                }
+            }
+        }
+        return apiResponse.at("/content/0/text").asText(null);
     }
 
     private JsonNode parseJsonText(String text) throws IOException {
@@ -208,5 +318,5 @@ public class InvoiceExtractor {
         return s.length() > 300 ? s.substring(0, 300) : s;
     }
 
-    private record AiRequest(String prompt) {}
+    private record AiRequest(String model, String input) {}
 }
